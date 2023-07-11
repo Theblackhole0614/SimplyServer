@@ -36,7 +36,7 @@ class Addr:
     def __init__(self, ip: str, port: int) -> None:
         self.ip: str = ip
         self.port: int = port
-        self.formated: tuple(str, int) = (ip, port)
+        self.formated: tuple[str, int] = (ip, port)
 
 class Events:
 
@@ -92,7 +92,7 @@ class Server:
 
 			try:
 				conn, addr = self.__SERVER.accept()
-				self.log(f"Client connects on port {self.__ADDR.port}...")
+				self.log(f"Client connects on port {self.__ADDR.port}...", log_formating=False)
 			except Exception as e:
 				self.stop()
 				return
@@ -136,7 +136,7 @@ class Server:
 		self.__listening = True
 		listen_thread.start()
 
-		self.log(f"Server is listening on port {self.__ADDR.port}...")
+		self.log(f"Server is listening on port {self.__ADDR.port}...", log_formating=False)
 		
 		event_thread = Thread(target=self.__process_events)
 		self.__processing = True
@@ -268,7 +268,7 @@ class Server:
 
 		self.__bufsize = bufsize
 
-	def get_conected_clients(self) -> list(Client):
+	def get_conected_clients(self) -> list[Client]:
 		"""Server.get_conected_clients() -> list(Client)
 
 		> Return all the clients connected to the server."""
@@ -289,14 +289,14 @@ class Server:
 
 		return self.__ADDR
 
-	def get_logging(self) -> tuple(bool, bool):
+	def get_logging(self) -> tuple[bool, bool]:
 		"""Server.get_logging() -> tuple(file_logging, console_logging)
 
 		> Return the 'file_logging' state and the 'console_logging' state."""
 
 		return (self.__file_logging, self.__console_logging)
 
-	def get_custom_logging(self) -> tuple(bool, bool):
+	def get_custom_logging(self) -> tuple[bool, bool]:
 		"""Server.get_custom_logging() -> tuple(custom_file_logging, custom_console_logging)
 
 		> Return the 'custom_file_logging' state and the 'custom_console_logging' state."""
