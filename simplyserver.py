@@ -97,7 +97,7 @@ class Server:
 				self.stop()
 				return
 
-			new_client = Client(self, conn, addr, self.__bufsize)
+			new_client = Client(self, conn, Addr(addr[0], addr[1]), self.__bufsize)
 			self.__connected_clients.append(new_client)
 			new_client.listen()
 			self._enqueue_event(Events.ON_JOIN, new_client)
@@ -163,21 +163,21 @@ class Server:
 		self.__QUEUE.join()
 		self.__processing = False
 
-	def broadcast(self, message: AnyStr, excluded_client: Client | Iterable[Client]) -> None:
+	def broadcast(self, message: AnyStr, excluded_client: Optional[Client | Iterable[Client]]=None) -> None:
 		"""Server.broadcast(message, excluded_client)
 
 		> Send the 'message' to all connected clients except 'excluded_client'. 
 		> 'excluded_client' can be a single client or a list | tuple of clients."""
 
 		if self.__running: 
-
+			
 			if type(excluded_client) is Client: excluded_client = [excluded_client]
 
 			for client in self.__connected_clients:
-
-				if client in excluded_client: continue
-				client.send(message)
-
+					if excluded_client != None: 
+						if client in excluded_client: continue
+					client.send(message)
+					
 	def log(self, *message: object, log_formating: Optional[bool]=True) -> None:
 		"""Server.log(message, log_formating=True)
 
@@ -315,7 +315,7 @@ class Server:
 
 class Client:
 
-	def __init__(self, server: Server, conn: socket, addr: Addr, bufsize: int) -> None:
+	def __init__(self, server: Server, conn: socket.socket, addr: Addr, bufsize: int) -> None:
 
 		self.__SERVER = server
 		self.__CONN = conn
@@ -323,6 +323,7 @@ class Client:
 		self.__FORMAT = 'utf-8'
 		self.__running = False
 		self.__bufsize = bufsize
+		self.__rest = ''
 
 	def __repr__(self) -> str:
 
@@ -343,7 +344,7 @@ class Client:
 				else:
 					self.__rest = rest + self.__rest
 			except UnicodeDecodeError as e:
-				self.__rest = ""
+				self.__rest = ''
 			except Exception as e:
 				if e.args[0] not in [10054, 10058, 10038]:
 					print(e)
@@ -370,7 +371,7 @@ class Client:
 		self.__running = False
 		self.__SERVER.get_conected_clients().remove(self)
 		self.__CONN.close()
-		self.__SERVER.log(f"Client disconnects on port {str(self.__PORT)}...", log_formating=False)
+		self.__SERVER.log(f"Client disconnects on port {self.__ADDR.port}...", log_formating=False)
 
 	def send(self, payload: AnyStr) -> None:
 		"""Client.send()

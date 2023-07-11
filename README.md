@@ -5,7 +5,7 @@ Create simple servers quickly in python!
 Simple exemple : ```python
 import simplyserver
 
-server = simplyserver.Server('test')
+server = simplyserver.Server('exemple')
 server.start()
 
 @server.event_listener
