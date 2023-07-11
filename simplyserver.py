@@ -1,6 +1,6 @@
 
 # Created by TheBlackHole
-# You can contact me on discord -> TheBlackHole#9598
+# You can contact me on discord -> HORLOGE-TheBlackHole
 
 # If you are a beginner in py network I advise you to go see the links below
 # https://docs.python.org/3/library/socket.html (English)
@@ -31,6 +31,13 @@ class SimplyServerException(Exception):
 
 # --------------------- Events -------------------- #
 
+class Addr:
+	
+    def __init__(self, ip: str, port: int) -> None:
+        self.ip: str = ip
+        self.port: int = port
+        self.formated: tuple(str, int) = (ip, port)
+
 class Events:
 
 	ON_JOIN = "on_join"
@@ -58,9 +65,7 @@ class Server:
 	def __init__(self, name: str, ip: Optional[str]="localhost", port: Optional[int]=5050, log_path: Optional[str]=".", custom_file_logs: Optional[bool]=True, custom_console_logs: Optional[bool]=True, bufsize: Optional[int]=128) -> None:
 
 		self.__name = sub("\W", "_", name)
-		self.__IP = ip
-		self.__PORT = port
-		self.__ADDR = (self.__IP, self.__PORT)
+		self.__ADDR = Addr(ip, port)
 		self.__log_path = log_path
 		self.__file_logging = True
 		self.__console_logging = True
@@ -79,7 +84,7 @@ class Server:
 
 	def __repr__(self) -> str:
 
-		return f"<server name={self.__NAME} ip={self.__IP} port={self.__PORT} is_running={self.__running}>"
+		return f"<server name={self.__name} ip={self.__ADDR.port} port={self.__ADDR.port} is_running={self.__running}>"
 
 	def __listen(self) -> None:
 
@@ -87,8 +92,7 @@ class Server:
 
 			try:
 				conn, addr = self.__SERVER.accept()
-				if self.__custom_file_logging: self.__LOGGER.debug(f"Client connects on port {str(self.__PORT)}...")
-				if self.__custom_console_logging: print(f"Client connects on port {str(self.__PORT)}...")
+				self.log(f"Client connects on port {self.__ADDR.port}...")
 			except Exception as e:
 				self.stop()
 				return
@@ -125,15 +129,14 @@ class Server:
 		if self.__custom_file_logging: self.__LOGGER.debug("\n>> Server launch <<")
 
 		self.__SERVER = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.__SERVER.bind(self.__ADDR)
+		self.__SERVER.bind(self.__ADDR.formated)
 		self.__SERVER.listen()
 
 		listen_thread = Thread(target=self.__listen)
 		self.__listening = True
 		listen_thread.start()
 
-		if self.__custom_file_logging: self.__LOGGER.debug(f"Server is listening on port {str(self.__PORT)}...")
-		if self.__custom_console_logging: print(f"Server is listening on port {str(self.__PORT)}...")
+		self.log(f"Server is listening on port {self.__ADDR.port}...")
 		
 		event_thread = Thread(target=self.__process_events)
 		self.__processing = True
@@ -279,26 +282,12 @@ class Server:
 
 		return self.__name
 
-	def get_addr(self) -> tuple(str, int):
-		"""Server.get_addr() -> tuple(ip, port)
+	def get_addr(self) -> Addr:
+		"""Server.get_addr() -> Addr
 
 		> Return the address of the server."""
 
 		return self.__ADDR
-
-	def get_ip(self) -> str:
-		"""Server.get_ip() -> str
-
-		> Return the ip of the server."""
-
-		return self.__IP
-
-	def get_port(self) -> int:
-		"""Server.get_port() -> int
-
-		> Return the port of the server."""
-
-		return self.__PORT
 
 	def get_logging(self) -> tuple(bool, bool):
 		"""Server.get_logging() -> tuple(file_logging, console_logging)
@@ -326,20 +315,18 @@ class Server:
 
 class Client:
 
-	def __init__(self, server: Server, conn: socket, addr: tuple(str, int), bufsize: int) -> None:
+	def __init__(self, server: Server, conn: socket, addr: Addr, bufsize: int) -> None:
 
 		self.__SERVER = server
 		self.__CONN = conn
 		self.__ADDR = addr
-		self.__IP = self.__ADDR[0]
-		self.__PORT = self.__ADDR[1]
 		self.__FORMAT = 'utf-8'
 		self.__running = False
 		self.__bufsize = bufsize
 
 	def __repr__(self) -> str:
 
-		return f"<client ip={self.__IP} port={self.__PORT} server={self.__SERVER.get_name()}>"
+		return f"<client ip={self.__ADDR.ip} port={self.__ADDR.port} server={self.__SERVER.get_name()}>"
 
 	def __listen(self) -> None:
 
@@ -410,8 +397,8 @@ class Client:
 
 		return self.__bufsize
 	
-	def get_addr(self) -> tuple(str, int):
-		"""Client.get_addr() -> tuple(str, int)
+	def get_addr(self) -> Addr:
+		"""Client.get_addr() -> Addr
 
 		> Return the addr of the client."""
 
