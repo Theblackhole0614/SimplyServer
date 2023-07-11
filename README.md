@@ -2,7 +2,8 @@
 
 Create simple servers quickly in python!
 
-Simple exemple : ```python
+Simple exemple : 
+```python
 import simplyserver
 
 server = simplyserver.Server('exemple')
