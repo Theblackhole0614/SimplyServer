@@ -11,5 +11,5 @@ server.start()
 
 @server.event_listener
 def on_join(event: simplyserver.Event):
-   server.broadcast(f'Client joined on port {event.client.get_addr()}')
+   server.broadcast(f'Client joined on port {event.client.get_addr().port}')
 ```
