@@ -10,6 +10,6 @@ server = simplyserver.Server('exemple')
 server.start()
 
 @server.event_listener
-def on_join(event: simplyserver.Event):
+def on_join(event: simplyserver.SEvent):
    server.broadcast(f'Client joined on port {event.client.get_addr().port}')
 ```

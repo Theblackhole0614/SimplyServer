@@ -14,7 +14,7 @@ from time import strftime, localtime
 from re import sub
 from typing import Optional, Callable, AnyStr, List, Any, Iterable, ByteString
 from queue import Queue
-from _ressources import SimplyServerException, Addr, EventType
+from simplyserver._ressources import SimplyServerException, Addr, EventType
 
 
 class SEvent:
@@ -67,7 +67,7 @@ class Server:
             try:
                 conn, addr = self.__SOCKET.accept()
                 self.log(
-                    f"Client connects on port {self.__addr.port}...", log_formating=False)
+                    f"Client connects on port {addr[1]}...", log_formating=False)
             except Exception as e:
                 self.stop()
                 return
