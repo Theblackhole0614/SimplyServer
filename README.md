@@ -6,7 +6,7 @@ Simple exemple :
 ```python
 import simplyserver
 
-server = simplyserver.Server('exemple')
+server = simplyserver.Server('example')
 server.start()
 
 @server.event_listener
