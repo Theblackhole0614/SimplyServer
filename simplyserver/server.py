@@ -264,8 +264,8 @@ class Server:
 
         self.__bufsize = bufsize
 
-    def get_conected_clients(self) -> list['SClient']:
-        """Server.get_conected_clients() -> list(Client)
+    def get_connected_clients(self) -> list['SClient']:
+        """Server.get_connected_clients() -> list(Client)
 
         > Return all the clients connected to the server."""
 
@@ -346,7 +346,7 @@ class SClient:
             except UnicodeDecodeError as e:
                 self.__rest = ''
             except Exception as e:
-                if e.args[0] not in [10054, 10058, 10038]:
+                if e.args[0] not in [10053, 10054, 10058, 10038]:
                     print(e)
                 self.close()
                 return
