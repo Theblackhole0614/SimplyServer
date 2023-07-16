@@ -2,12 +2,9 @@
 # Created by TheBlackHole
 # You can contact me on discord -> HORLOGE-TheBlackHole
 
-# If you are a beginner in py network I advise you to go see the links below
-# https://docs.python.org/3/library/socket.html (English)
-# https://python.doctor/page-reseaux-sockets-python-port (French)
-
 import socket
 import logging
+from random import randint
 from threading import Thread
 from os.path import isdir
 from time import strftime, localtime
@@ -25,12 +22,12 @@ class SEvent:
         self.client: SClient = client
 
 
-class SMessageEvent(SEvent):
+class SReceiveEvent(SEvent):
 
-    def __init__(self, server: 'Server', client: 'SClient', message: AnyStr):
+    def __init__(self, server: 'Server', client: 'SClient', data: AnyStr):
 
         super().__init__(server, client)
-        self.message: AnyStr = message
+        self.data: AnyStr = data
 
 
 class Server:
@@ -72,7 +69,7 @@ class Server:
                 self.stop()
                 return
 
-            new_client = SClient(self, conn, Addr(
+            new_client = SClient(self.__create_id(), self, conn, Addr(
                 addr[0], addr[1]), self.__bufsize)
             self.__connected_clients.append(new_client)
             new_client.listen()
@@ -84,12 +81,19 @@ class Server:
 
             event_name, client, *payload = self.__queue.get(block=True)
             if event_name == EventType.ON_RECEIVE:
-                event = SMessageEvent(self, client, payload[0])
+                event = SReceiveEvent(self, client, payload[0])
             else:
                 event = SEvent(self, client)
             if self.__events[event_name] != None:
                 self.__events[event_name](event)
             self.__queue.task_done()
+
+    def __create_id(self) -> int:
+        
+        new_id = randint(100000, 999999)
+        while new_id in [client.get_id() for client in self.__connected_clients]:
+            new_id = randint(100000, 999999)
+        return new_id
 
     def _enqueue_event(self, event: int, client: 'SClient', payload: Optional[Any] = None) -> None:
 
@@ -144,10 +148,10 @@ class Server:
         self.__queue.join()
         self.__processing = False
 
-    def broadcast(self, message: AnyStr, excluded_client: Optional['SClient' | Iterable['SClient']] = None) -> None:
-        """Server.broadcast(message, excluded_client)
+    def broadcast(self, data: AnyStr, excluded_client: Optional['SClient' | Iterable['SClient']] = None) -> None:
+        """Server.broadcast(data, excluded_client)
 
-        > Send the 'message' to all connected clients except 'excluded_client'. 
+        > Send the 'data' to all connected clients except 'excluded_client'. 
         > 'excluded_client' can be a single client or a list | tuple of clients."""
 
         if self.__running:
@@ -159,7 +163,7 @@ class Server:
                 if excluded_client != None:
                     if client in excluded_client:
                         continue
-                client.send(message)
+                client.send(data)
 
     def log(self, *message: object, log_formating: Optional[bool] = True) -> None:
         """Server.log(message, log_formating=True)
@@ -183,8 +187,8 @@ class Server:
                 pass
 
         > Register the function 'event_name' as an event.
-        > 'event_name' must be a valid event ("on_join", "on_quit", "on_message"). 
-        > If the 'event_name' is 'on_message' the 'event' is an instance of MessageEvent, 
+        > 'event_name' must be a valid event ("on_join", "on_quit", "on_receive"). 
+        > If the 'event_name' is 'on_receive' the 'event' is an instance of MessageEvent, 
         otherwise the 'event' is an instance of Event."""
 
         if listener.__name__ not in self.__events.keys():
@@ -307,15 +311,16 @@ class Server:
 
 class SClient:
 
-    def __init__(self, server: 'Server', conn: socket.socket, addr: 'Addr', bufsize: int) -> None:
+    def __init__(self, id: int, server: 'Server', conn: socket.socket, addr: 'Addr', bufsize: int) -> None:
 
+        self.__id = id
         self.__server = server
         self.__conn = conn
         self.__addr = addr
         self.__format = 'utf-8'
         self.__running = False
         self.__bufsize = bufsize
-        self.__rest = ''
+        self.__rest = b''
 
     def __repr__(self) -> str:
 
@@ -326,15 +331,16 @@ class SClient:
         while self.__running:
 
             try:
-                received_packets = self.__conn.recv(
-                    self.__bufsize).decode(self.__format)
+                received_packets = self.__conn.recv(self.__bufsize)
                 rest = self.__rest
-                *packets, self.__rest = received_packets.split("\0")
+                *packets, self.__rest = received_packets.split(b"\0")
                 if len(packets) > 0:
                     packets[0] = rest + packets[0]
                     for packet in packets:
+                        if packet.startswith(b"[STR-DATA]"): 
+                            packet = packet.decode(self.__format).removeprefix("[STR-DATA]")
                         self.__server._enqueue_event(
-                            EventType.ON_MESSAGE_RECEIVE, self, packet)
+                            EventType.ON_RECEIVE, self, packet)
                 else:
                     self.__rest = rest + self.__rest
             except UnicodeDecodeError as e:
@@ -379,7 +385,15 @@ class SClient:
         if isinstance(payload, bytes):
             self.__conn.send(payload)
         else:
+            payload = "[STR-DATA]" + payload
             self.__conn.send(payload.encode(self.__format))
+
+    def get_id(self) -> int:
+        """Client.get_id() -> int
+
+        > Return the id of the client."""
+
+        return self.__id
 
     def set_bufsize(self, bufsize: int) -> None:
         """Client.set_bufsize(bufsize)
