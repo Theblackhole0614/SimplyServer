@@ -9,7 +9,7 @@ from threading import Thread
 from os.path import isdir
 from time import strftime, localtime
 from re import sub
-from typing import Optional, Callable, AnyStr, List, Any, Iterable, ByteString
+from typing import Optional, Callable, AnyStr, List, Any, Iterable, ByteString, Union
 from queue import Queue
 from simplyserver._ressources import SimplyServerException, Addr, EventType
 
@@ -30,6 +30,14 @@ class SReceiveEvent(SEvent):
         self.data: AnyStr = data
 
 
+class SReceiveCommand(SEvent):
+
+    def __init__(self, server: 'Server', client: 'SClient', args: Iterable):
+
+        super().__init__(server, client)
+        self.args: Iterable = args
+
+
 class Server:
 
     def __init__(self, name: str, ip: Optional[str] = "localhost", port: Optional[int] = 5050, log_path: Optional[str] = ".", custom_file_logs: Optional[bool] = True, custom_console_logs: Optional[bool] = True, bufsize: Optional[int] = 128) -> None:
@@ -41,17 +49,19 @@ class Server:
         self.__console_logging = True
         self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel("DEBUG")
-        self.set_log_path(self.__log_path)
+        self.log_path = self.__log_path
         self.__custom_file_logging = custom_file_logs
         self.__custom_console_logging = custom_console_logs
         self.__bufsize = bufsize
         self.__events = {EventType.ON_JOIN: None,
                          EventType.ON_QUIT: None, EventType.ON_RECEIVE: None}
-        self.__queue = Queue(0)
+        self.__commands = dict()
+        self.__queue_event = Queue(0)
+        self.__queue_command = Queue(0)
         self.__running = False
         self.__listening = False
         self.__processing = False
-        self.__connected_clients = []
+        self.__connected_clients = dict()
 
     def __repr__(self) -> str:
 
@@ -71,7 +81,7 @@ class Server:
 
             new_client = SClient(self.__create_id(), self, conn, Addr(
                 addr[0], addr[1]), self.__bufsize)
-            self.__connected_clients.append(new_client)
+            self.__connected_clients[new_client.id] = new_client
             new_client.listen()
             self._enqueue_event(EventType.ON_JOIN, new_client)
 
@@ -79,25 +89,43 @@ class Server:
 
         while self.__processing:
 
-            event_name, client, *payload = self.__queue.get(block=True)
+            event_name, client, *payload = self.__queue_event.get(block=True)
             if event_name == EventType.ON_RECEIVE:
                 event = SReceiveEvent(self, client, payload[0])
             else:
                 event = SEvent(self, client)
             if self.__events[event_name] != None:
                 self.__events[event_name](event)
-            self.__queue.task_done()
+            self.__queue_event.task_done()
+
+    def __process_commands(self) -> None:
+
+        while self.__processing:
+
+            command_name, client, *payload = self.__queue_command.get(block=True)
+            command_event = SReceiveCommand(self, client, payload[0])
+            if self.__commands[command_name] != None:
+                self.__commands[command_name](command_event)
+            self.__queue_command.task_done()
 
     def __create_id(self) -> int:
         
         new_id = randint(100000, 999999)
-        while new_id in [client.get_id() for client in self.__connected_clients]:
+        while not self._check_valid_id(new_id):
             new_id = randint(100000, 999999)
         return new_id
+    
+    def _check_valid_id(self, id: int) -> bool:
 
-    def _enqueue_event(self, event: int, client: 'SClient', payload: Optional[Any] = None) -> None:
+        return True if len(str(id)) == 6 and id not in [client.id for client in self.__connected_clients.values()] else False
 
-        self.__queue.put((event, client, payload))
+    def _enqueue_event(self, event: str, client: 'SClient', payload: Optional[Any] = None) -> None:
+
+        self.__queue_event.put((event, client, payload))
+
+    def _enqueue_command(self, command: str, client: 'SClient', payload: Optional[Any] = None) -> None:
+
+        self.__queue_command.put((command, client, payload))
 
     def start(self) -> None:
         """Server.start()
@@ -122,9 +150,9 @@ class Server:
         self.log(
             f"Server is listening on port {self.__addr.port}...", log_formating=False)
 
-        event_thread = Thread(target=self.__process_events)
         self.__processing = True
-        event_thread.start()
+        Thread(target=self.__process_events).start()
+        Thread(target=self.__process_commands).start()
 
     def stop(self) -> None:
         """Server.stop()
@@ -142,16 +170,17 @@ class Server:
             self.__SOCKET.close()
 
         connected_clients = self.__connected_clients.copy()
-        for client in connected_clients:
+        for client in connected_clients.values():
             client.close()
 
-        self.__queue.join()
+        self.__queue_event.join()
+        self.__queue_command.join()
         self.__processing = False
 
     def broadcast(self, data: AnyStr, excluded_client: Optional['SClient' | Iterable['SClient']] = None) -> None:
         """Server.broadcast(data, excluded_client)
 
-        > Send the 'data' to all connected clients except 'excluded_client'. 
+        > Send the 'data' to all connected clients except 'excluded_client'. \n
         > 'excluded_client' can be a single client or a list | tuple of clients."""
 
         if self.__running:
@@ -159,7 +188,7 @@ class Server:
             if type(excluded_client) is SClient:
                 excluded_client = [excluded_client]
 
-            for client in self.__connected_clients:
+            for client in self.__connected_clients.values():
                 if excluded_client != None:
                     if client in excluded_client:
                         continue
@@ -168,8 +197,8 @@ class Server:
     def log(self, *message: object, log_formating: Optional[bool] = True) -> None:
         """Server.log(message, log_formating=True)
 
-        > Log the 'message' into the console if console_logging is True.
-        > Log the 'message' into the log file if file_logging is True.
+        > Log the 'message' into the console if console_logging is True.\n
+        > Log the 'message' into the log file if file_logging is True.\n
         > Add '[date] [time] [server name]' before 'message' if 'log_formating' is True."""
 
         if log_formating:
@@ -181,20 +210,42 @@ class Server:
         if self.__file_logging:
             self.__logger.debug(f"{log_message}")
 
-    def event_listener(self, listener: Callable):
-        """@Server.event_listener
-        def event_name(event: Event | MessageEvent):
+    def add_event_listener(self, event_type: str):
+        """@Server.add_event_listener(event_type)
+         def function(event: Event | SReceiveEvent):
                 pass
 
-        > Register the function 'event_name' as an event.
-        > 'event_name' must be a valid event ("on_join", "on_quit", "on_receive"). 
-        > If the 'event_name' is 'on_receive' the 'event' is an instance of MessageEvent, 
-        otherwise the 'event' is an instance of Event."""
+        > Register the function as an event listener.\n
+        > 'event_type' must be a valid event ("on_join", "on_quit", "on_receive") 
+        or (EventType.ON_JOIN, EventType.ON_QUIT, EventType.ON_RECEIVE)\n
+        > If the 'event_type' is 'on_receive' the parameter 'event' is an instance of SReceiveEvent,
+        otherwise the parameter 'event' is an instance of SEvent."""
 
-        if listener.__name__ not in self.__events.keys():
-            raise SimplyServerException(
-                f"The specified event name '{listener.__name__}' is not a valid event")
-        self.__events[listener.__name__] = listener
+        def decorator(listener: Callable):
+            if event_type not in self.__events.keys():
+                raise SimplyServerException(
+                    f"The specified event name '{event_type}' is not a valid event")
+            self.__events[event_type] = listener
+            def wrapper(*args, **kwargs):
+                return listener(*args, **kwargs)
+            return wrapper
+        return decorator
+    
+    def add_command_listener(self, command: str, prefix: str = ""):
+        """@Server.add_command_listener(command)
+         def function(event: SReceiveCommand):
+                pass
+
+        > Register the function as an command listener.\n
+        > Whenever a client send data which start with the 'command' the function will be called.\n
+        > 'event' is an instance of SReceiveCommand."""
+        command = prefix + command
+        def decorator(listener: Callable):
+            self.__commands[command] = listener
+            def wrapper(*args, **kwargs):
+                return listener(*args, **kwargs)
+            return wrapper
+        return decorator
 
     def is_running(self) -> bool:
         """Server.is_running()
@@ -203,12 +254,76 @@ class Server:
 
         return self.__running
 
-    def set_log_path(self, log_path: str) -> None:
-        """Server.set_log_path(log_path)
+    def kick(self, client_to_kick: Union['SClient', int]):
+        """Server.kick(client_to_kick)
 
-        > Set the file where the server is logging.
+        > Kick the 'client_to_kick' from the server."""
+
+        if isinstance(client_to_kick, int):
+            client_to_kick = self.connected_clients[client_to_kick]
+        client_to_kick.close()
+
+    @property
+    def bufsize(self) -> int:
+        """Server.bufsize -> int
+
+        > Return the receive bufsize of the server."""
+
+        return self.__bufsize
+
+    @bufsize.setter
+    def bufsize(self, bufsize: int) -> None:
+        """Server.bufsize = bufsize
+
+        > Set the receive bufsize to 'bufsize'."""
+
+        self.__bufsize = bufsize
+
+    @property
+    def connected_clients(self) -> dict[int, 'SClient']:
+        """Server.connected_clients -> dict(int, Client)
+
+        > Return all the clients connected to the server maped with their ids."""
+
+        return self.__connected_clients
+    
+    @property
+    def registered_commands(self) -> Iterable:
+        """Server.registered_commands -> dict(str, Callable)
+
+        > Return all the registered commands."""
+
+        return self.__commands.keys()
+
+    @property
+    def name(self) -> str:
+        """Server.name -> str
+
+        > Return the name of the server."""
+
+        return self.__name
+
+    @property
+    def addr(self) -> Addr:
+        """Server.addr -> Addr
+
+        > Return the address of the server."""
+
+        return self.__addr
+    
+    @property
+    def log_path(self) -> str:
+        """Server.log_path -> str
+
+        > Return the log path of the server."""
+
+    @log_path.setter
+    def log_path(self, log_path: str) -> None:
+        """Server.log_path = log_path
+
+        > Set the file where the server is logging.\n
         > If 'log_path' is None, the server will not create and log into a file,
-        file_logging and custom_file_logging are set to False.
+        file_logging and custom_file_logging are set to False.\n
         > Otherwise, if 'log_path' is not None, the server will create and log 
         into the specified file, but not set file_logging and 
         custom_file_logging to True."""
@@ -232,10 +347,19 @@ class Server:
                         f"'{log_path}' is not a valid path")
             self.__log_path = log_path
 
-    def set_logging(self, file_logging: bool, console_logging: bool) -> None:
-        """Server.set_logging(file_logging, console_logging)
+    @property
+    def logging(self) -> tuple[bool, bool]:
+        """Server.logging -> tuple(file_logging, console_logging)
 
-        > Set the file_logging to 'file_logging' and the console_logging to 'console_logging'.
+        > Return the 'file_logging' state and the 'console_logging' state."""
+
+        return (self.__file_logging, self.__console_logging)
+    
+    @logging.setter
+    def logging(self, file_logging: bool, console_logging: bool) -> None:
+        """Server.logging = file_logging, console_logging
+
+        > Set the file_logging to 'file_logging' and the console_logging to 'console_logging'.\n
         > Raise an exception if 'file_logging' is set to True whereas the server is not
         logging."""
 
@@ -245,10 +369,19 @@ class Server:
         self.__file_logging = file_logging
         self.__console_logging = console_logging
 
-    def set_custom_logging(self, custom_file_logging: bool, custom_console_logging: bool) -> None:
-        """Server.set_custom_logging(custom_file_logging, custom_console_logging)
+    @property
+    def custom_logging(self) -> tuple[bool, bool]:
+        """Server.custom_logging -> tuple(custom_file_logging, custom_console_logging)
 
-        > Set the custom_file_logging to 'custom_file_logging' and the custom_console_logging to 'custom_console_logging'.
+        > Return the 'custom_file_logging' state and the 'custom_console_logging' state."""
+
+        return (self.__custom_file_logging, self.__custom_console_logging)
+    
+    @custom_logging.setter
+    def custom_logging(self, custom_file_logging: bool, custom_console_logging: bool) -> None:
+        """Server.custom_logging = custom_file_logging, custom_console_logging
+
+        > Set the custom_file_logging to 'custom_file_logging' and the custom_console_logging to 'custom_console_logging'.\n
         > Raise an exception if 'custom_file_logging' is set to True whereas the server is not logging."""
 
         if custom_file_logging and self.__log_path is None:
@@ -257,54 +390,13 @@ class Server:
         self.__custom_file_logging = custom_file_logging
         self.__custom_console_logging = custom_console_logging
 
-    def set_bufsize(self, bufsize: int) -> None:
-        """Server.set_bufsize(bufsize)
+    @property
+    def is_running(self) -> bool:
+        """Server.is_running -> bool
 
-        > Set the receive bufsize to 'bufsize'."""
+        > Return the running state of the server."""
 
-        self.__bufsize = bufsize
-
-    def get_connected_clients(self) -> list['SClient']:
-        """Server.get_connected_clients() -> list(Client)
-
-        > Return all the clients connected to the server."""
-
-        return self.__connected_clients
-
-    def get_name(self) -> str:
-        """Server.get_name() -> str
-
-        > Return the name of the server."""
-
-        return self.__name
-
-    def get_addr(self) -> Addr:
-        """Server.get_addr() -> Addr
-
-        > Return the address of the server."""
-
-        return self.__addr
-
-    def get_logging(self) -> tuple[bool, bool]:
-        """Server.get_logging() -> tuple(file_logging, console_logging)
-
-        > Return the 'file_logging' state and the 'console_logging' state."""
-
-        return (self.__file_logging, self.__console_logging)
-
-    def get_custom_logging(self) -> tuple[bool, bool]:
-        """Server.get_custom_logging() -> tuple(custom_file_logging, custom_console_logging)
-
-        > Return the 'custom_file_logging' state and the 'custom_console_logging' state."""
-
-        return (self.__custom_file_logging, self.__custom_console_logging)
-
-    def get_bufsize(self, bufsize: int) -> None:
-        """Server.get_bufsize() -> int
-
-        > Return the receive bufsize of the server."""
-
-        return self.__bufsize
+        return self.__running
 
 
 # --------------------- Client --------------------- #
@@ -324,7 +416,7 @@ class SClient:
 
     def __repr__(self) -> str:
 
-        return f"<client ip={self.__addr.ip} port={self.__addr.port} server={self.__server.get_name()}>"
+        return f"<client ip={self.__addr.ip} port={self.__addr.port} server={self.__server.name}>"
 
     def __listen(self) -> None:
 
@@ -337,10 +429,16 @@ class SClient:
                 if len(packets) > 0:
                     packets[0] = rest + packets[0]
                     for packet in packets:
+                        is_command = False
                         if packet.startswith(b"[STR-DATA]"): 
                             packet = packet.decode(self.__format).removeprefix("[STR-DATA]")
-                        self.__server._enqueue_event(
-                            EventType.ON_RECEIVE, self, packet)
+                            for command in self.__server.registered_commands:
+                                if packet.startswith(command):
+                                    is_command = True
+                                    self.__server._enqueue_command(command, self, packet.split()[1:])
+                                    break
+                        if not is_command:
+                            self.__server._enqueue_event(EventType.ON_RECEIVE, self, packet)
                 else:
                     self.__rest = rest + self.__rest
             except UnicodeDecodeError as e:
@@ -371,7 +469,7 @@ class SClient:
             return
         self.__server._enqueue_event(EventType.ON_QUIT, self)
         self.__running = False
-        self.__server.get_conected_clients().remove(self)
+        self.__server.connected_clients.pop(self.id)
         self.__conn.close()
         self.__server.log(
             f"Client disconnects on port {self.__addr.port}...", log_formating=False)
@@ -379,7 +477,7 @@ class SClient:
     def send(self, payload: AnyStr) -> None:
         """Client.send()
 
-        > Send the payload to the connected client.
+        > Send the payload to the connected client.\n
         > The payload must be a string or bytes."""
 
         if isinstance(payload, bytes):
@@ -388,29 +486,43 @@ class SClient:
             payload = "[STR-DATA]" + payload
             self.__conn.send(payload.encode(self.__format))
 
-    def get_id(self) -> int:
-        """Client.get_id() -> int
+    @property
+    def id(self) -> int:
+        """Client.id -> int
 
         > Return the id of the client."""
 
         return self.__id
+    
+    @id.setter
+    def id(self, id: int) -> None:
+        """Client.id = id
 
-    def set_bufsize(self, bufsize: int) -> None:
-        """Client.set_bufsize(bufsize)
+        > Set the id of the client.\n
+        > 'id' must have 6 digits and not used by another client else this won't change the id."""
 
-        > Set the receive bufsize to 'bufsize'."""
+        if self.__server._check_valid_id(id):
+            self.__id = id
 
-        self.__bufsize = bufsize
-
-    def get_bufsize(self) -> int:
-        """Client.get_bufsize() -> int
+    @property
+    def bufsize(self) -> int:
+        """Client.bufsize -> int
 
         > Return the receive bufsize of the client."""
 
         return self.__bufsize
 
-    def get_addr(self) -> Addr:
-        """Client.get_addr() -> Addr
+    @bufsize.setter
+    def bufsize(self, bufsize: int) -> None:
+        """Client.bufsize = bufsize
+
+        > Set the receive bufsize to 'bufsize'."""
+
+        self.__bufsize = bufsize
+
+    @property
+    def addr(self) -> Addr:
+        """Client.addr -> Addr
 
         > Return the addr of the client."""
 
