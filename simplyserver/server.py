@@ -9,7 +9,7 @@ from threading import Thread
 from os.path import isdir
 from time import strftime, localtime
 from re import sub
-from typing import Optional, Callable, AnyStr, List, Any, Iterable, ByteString, Union
+from typing import Optional, Callable, AnyStr, Any, Iterable, Union
 from queue import Queue
 from simplyserver._ressources import SimplyServerException, Addr, EventType
 
@@ -40,16 +40,16 @@ class SReceiveCommand(SEvent):
 
 class Server:
 
-    def __init__(self, name: str, ip: Optional[str] = "localhost", port: Optional[int] = 5050, log_path: Optional[str] = ".", custom_file_logs: Optional[bool] = True, custom_console_logs: Optional[bool] = True, bufsize: Optional[int] = 128) -> None:
+    def __init__(self, name: str, ip: str = "localhost", port: int = 5050, log_path: Optional[str] = ".", custom_file_logs: bool = True, custom_console_logs: bool = True, bufsize: int = 128) -> None:
 
-        self.__name = sub("\W", "_", name)
+        self.__name = sub(r"\W", "_", name)
         self.__addr = Addr(ip, port)
         self.__log_path = log_path
         self.__file_logging = True
         self.__console_logging = True
         self.__logger = logging.getLogger(__name__)
         self.__logger.setLevel("DEBUG")
-        self.log_path = self.__log_path
+        self.log_path: str | None = self.__log_path
         self.__custom_file_logging = custom_file_logs
         self.__custom_console_logging = custom_console_logs
         self.__bufsize = bufsize
@@ -94,8 +94,8 @@ class Server:
                 event = SReceiveEvent(self, client, payload[0])
             else:
                 event = SEvent(self, client)
-            if self.__events[event_name] != None:
-                self.__events[event_name](event)
+            if self.__events[event_name] is not None:
+                self.__events[event_name](event) # type: ignore
             self.__queue_event.task_done()
 
     def __process_commands(self) -> None:
@@ -194,7 +194,7 @@ class Server:
                         continue
                 client.send(data)
 
-    def log(self, *message: object, log_formating: Optional[bool] = True) -> None:
+    def log(self, *message: str, log_formating: Optional[bool] = True) -> None:
         """Server.log(message, log_formating=True)
 
         > Log the 'message' into the console if console_logging is True.\n
@@ -225,7 +225,7 @@ class Server:
             if event_type not in self.__events.keys():
                 raise SimplyServerException(
                     f"The specified event name '{event_type}' is not a valid event")
-            self.__events[event_type] = listener
+            self.__events[event_type] = listener # type: ignore
             def wrapper(*args, **kwargs):
                 return listener(*args, **kwargs)
             return wrapper
@@ -246,13 +246,6 @@ class Server:
                 return listener(*args, **kwargs)
             return wrapper
         return decorator
-
-    def is_running(self) -> bool:
-        """Server.is_running()
-
-        > Return True or False if the server is started or not."""
-
-        return self.__running
 
     def kick(self, client_to_kick: Union['SClient', int]):
         """Server.kick(client_to_kick)
@@ -312,13 +305,15 @@ class Server:
         return self.__addr
     
     @property
-    def log_path(self) -> str:
+    def log_path(self) -> str | None: # type: ignore
         """Server.log_path -> str
 
         > Return the log path of the server."""
 
+        return self.__log_path
+
     @log_path.setter
-    def log_path(self, log_path: str) -> None:
+    def log_path(self, log_path: str | None) -> None: # type: ignore
         """Server.log_path = log_path
 
         > Set the file where the server is logging.\n
@@ -412,7 +407,7 @@ class SClient:
         self.__format = 'utf-8'
         self.__running = False
         self.__bufsize = bufsize
-        self.__rest = b''
+        self.__rest: bytes = b''
 
     def __repr__(self) -> str:
 
@@ -424,7 +419,7 @@ class SClient:
 
             try:
                 received_packets = self.__conn.recv(self.__bufsize)
-                rest = self.__rest
+                rest: bytes = self.__rest
                 *packets, self.__rest = received_packets.split(b"\0")
                 if len(packets) > 0:
                     packets[0] = rest + packets[0]
@@ -440,9 +435,9 @@ class SClient:
                         if not is_command:
                             self.__server._enqueue_event(EventType.ON_RECEIVE, self, packet)
                 else:
-                    self.__rest = rest + self.__rest
+                    self.__rest = rest + self.__rest # type: ignore
             except UnicodeDecodeError as e:
-                self.__rest = ''
+                self.__rest = b''
             except Exception as e:
                 if e.args[0] not in [10053, 10054, 10058, 10038]:
                     print(e)
